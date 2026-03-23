@@ -1,0 +1,5 @@
+{
+  "name": "Franchise Recipe Vault",
+  "description": "A high-reliability digital recipe management system with RAG-based AI search and portion scaling.",
+  "requestFramePermissions": []
+}

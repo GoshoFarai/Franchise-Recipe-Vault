@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "Recipe": {
+      "title": "Recipe",
+      "description": "A recipe in the vault",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the recipe" },
+        "description": { "type": "string", "description": "Recipe story, origin, or creator notes" },
+        "base_yield_quantity": { "type": "number", "description": "The base yield quantity" },
+        "base_yield_unit": { "type": "string", "description": "The base yield unit" },
+        "station_assignment": { "type": "string", "description": "The station assignment" },
+        "food_safety_metadata": {
+          "type": "object",
+          "properties": {
+            "min_temp": { "type": "number" },
+            "hold_time": { "type": "number" },
+            "hold_time_minutes": { "type": "number" }
+          }
+        },
+        "ingredients": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "quantity": { "type": "number" },
+              "unit": { "type": "string" }
+            }
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "private_notes": { "type": "string" },
+        "authorUid": { "type": "string", "description": "The UID of the user who created the recipe" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["menu", "batch"] },
+        "batchYield": { "type": "number" },
+        "batchYieldUnit": { "type": "string", "enum": ["g", "kg", "ml", "L", "count"] },
+        "storage": { "type": "string", "enum": ["fridge", "ambient", "freezer"] }
+      },
+      "required": ["name", "base_yield_quantity", "base_yield_unit", "station_assignment", "ingredients", "steps", "authorUid", "type"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Information about a user",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] }
+      },
+      "required": ["displayName", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/recipes/{recipeId}": {
+      "schema": "Recipe",
+      "description": "Collection of recipes"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles"
+    }
+  }
+}

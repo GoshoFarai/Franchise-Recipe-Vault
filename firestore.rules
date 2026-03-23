@@ -1,0 +1,118 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId
+    // Fields:
+    //   - displayName: string (required, 1-100 chars)
+    //   - email: string (required, valid email)
+    //   - role: string (required, ['admin', 'user'])
+    //
+    // Collection: recipes
+    // Document ID: recipeId
+    // Fields:
+    //   - name: string (required, 1-200 chars)
+    //   - description: string (optional, max 2000 chars)
+    //   - base_yield_quantity: number (required, positive)
+    //   - base_yield_unit: string (required, 1-50 chars)
+    //   - station_assignment: string (required, 1-50 chars)
+    //   - food_safety_metadata: map (required)
+    //     - min_temp: number (required)
+    //     - hold_time: number (required)
+    //     - hold_time_minutes: number (required)
+    //   - ingredients: list (required, max 100 items)
+    //   - steps: list (required, max 50 items)
+    //   - tags: list (optional, max 20 items)
+    //   - private_notes: string (optional, max 2000 chars)
+    //   - authorUid: string (required, immutable)
+    //   - createdAt: timestamp (required, immutable)
+    //   - type: string (required, ['menu', 'batch'])
+    //   - batchYield: number (optional, positive)
+    //   - batchYieldUnit: string (optional, ['g', 'kg', 'ml', 'L', 'count'])
+    //   - storage: string (optional, ['fridge', 'ambient', 'freezer'])
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasOnly(['displayName', 'email', 'role']) &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             isValidEmail(data.email) &&
+             data.role in ['admin', 'user'];
+    }
+
+    function isValidRecipe(data) {
+      let requiredFields = ['name', 'base_yield_quantity', 'base_yield_unit', 'station_assignment', 'ingredients', 'steps', 'authorUid', 'createdAt', 'food_safety_metadata', 'type'];
+      let optionalFields = ['private_notes', 'tags', 'description', 'batchYield', 'batchYieldUnit', 'storage'];
+      let allFields = requiredFields.concat(optionalFields);
+      
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().hasOnly(allFields) &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+             data.base_yield_quantity is number && data.base_yield_quantity > 0 &&
+             data.base_yield_unit is string && data.base_yield_unit.size() >= 1 && data.base_yield_unit.size() <= 50 &&
+             data.station_assignment is string && data.station_assignment.size() >= 1 && data.station_assignment.size() <= 50 &&
+             data.food_safety_metadata is map &&
+             data.food_safety_metadata.keys().hasAll(['min_temp', 'hold_time', 'hold_time_minutes']) &&
+             data.food_safety_metadata.min_temp is number &&
+             data.food_safety_metadata.hold_time is number &&
+             data.food_safety_metadata.hold_time_minutes is number &&
+             data.ingredients is list && data.ingredients.size() <= 100 &&
+             data.steps is list && data.steps.size() <= 50 &&
+             (!('tags' in data) || (data.tags is list && data.tags.size() <= 20)) &&
+             (!('private_notes' in data) || (data.private_notes is string && data.private_notes.size() <= 2000)) &&
+             data.authorUid is string &&
+             data.createdAt is timestamp &&
+             data.type in ['menu', 'batch'] &&
+             (!('batchYield' in data) || (data.batchYield is number && data.batchYield > 0)) &&
+             (!('batchYieldUnit' in data) || (data.batchYieldUnit in ['g', 'kg', 'ml', 'L', 'count'])) &&
+             (!('storage' in data) || (data.storage in ['fridge', 'ambient', 'freezer']));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      (request.resource.data.role == 'user' || 
+                       (request.resource.data.role == 'admin' && request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true));
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
+    }
+
+    match /recipes/{recipeId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidRecipe(request.resource.data) && request.resource.data.authorUid == request.auth.uid;
+      allow update: if isAuthenticated() && isValidRecipe(request.resource.data) && 
+                      ((resource.data.authorUid == request.auth.uid && request.resource.data.authorUid == resource.data.authorUid && request.resource.data.createdAt == resource.data.createdAt) || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.authorUid == request.auth.uid || isAdmin());
+    }
+  }
+}
