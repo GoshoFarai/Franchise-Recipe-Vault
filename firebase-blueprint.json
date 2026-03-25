@@ -16,7 +16,8 @@
             "min_temp": { "type": "number" },
             "hold_time": { "type": "number" },
             "hold_time_minutes": { "type": "number" }
-          }
+          },
+          "required": ["min_temp", "hold_time", "hold_time_minutes"]
         },
         "ingredients": {
           "type": "array",
@@ -27,7 +28,8 @@
               "name": { "type": "string" },
               "quantity": { "type": "number" },
               "unit": { "type": "string" }
-            }
+            },
+            "required": ["id", "name", "quantity", "unit"]
           }
         },
         "steps": {
@@ -38,15 +40,19 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "allergens": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "private_notes": { "type": "string" },
         "authorUid": { "type": "string", "description": "The UID of the user who created the recipe" },
         "createdAt": { "type": "string", "format": "date-time" },
         "type": { "type": "string", "enum": ["menu", "batch"] },
         "batchYield": { "type": "number" },
-        "batchYieldUnit": { "type": "string", "enum": ["g", "kg", "ml", "L", "count"] },
-        "storage": { "type": "string", "enum": ["fridge", "ambient", "freezer"] }
+        "batchYieldUnit": { "type": "string" },
+        "storage": { "type": "string" }
       },
-      "required": ["name", "base_yield_quantity", "base_yield_unit", "station_assignment", "ingredients", "steps", "authorUid", "type"]
+      "required": ["name", "base_yield_quantity", "base_yield_unit", "station_assignment", "ingredients", "steps", "authorUid", "createdAt", "food_safety_metadata"]
     },
     "UserProfile": {
       "title": "User Profile",

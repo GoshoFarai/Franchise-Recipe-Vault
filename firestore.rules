@@ -27,13 +27,14 @@ service cloud.firestore {
     //   - ingredients: list (required, max 100 items)
     //   - steps: list (required, max 50 items)
     //   - tags: list (optional, max 20 items)
+    //   - allergens: list (optional, max 10 items)
     //   - private_notes: string (optional, max 2000 chars)
+    //   - type: string (optional, ['menu', 'batch'])
+    //   - batchYield: number (optional)
+    //   - batchYieldUnit: string (optional)
+    //   - storage: string (optional)
     //   - authorUid: string (required, immutable)
     //   - createdAt: timestamp (required, immutable)
-    //   - type: string (required, ['menu', 'batch'])
-    //   - batchYield: number (optional, positive)
-    //   - batchYieldUnit: string (optional, ['g', 'kg', 'ml', 'L', 'count'])
-    //   - storage: string (optional, ['fridge', 'ambient', 'freezer'])
     //
     // ===============================================================
 
@@ -51,7 +52,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
          (request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true));
     }
 
@@ -67,12 +68,11 @@ service cloud.firestore {
     }
 
     function isValidRecipe(data) {
-      let requiredFields = ['name', 'base_yield_quantity', 'base_yield_unit', 'station_assignment', 'ingredients', 'steps', 'authorUid', 'createdAt', 'food_safety_metadata', 'type'];
-      let optionalFields = ['private_notes', 'tags', 'description', 'batchYield', 'batchYieldUnit', 'storage'];
-      let allFields = requiredFields.concat(optionalFields);
+      let requiredFields = ['name', 'base_yield_quantity', 'base_yield_unit', 'station_assignment', 'ingredients', 'steps', 'authorUid', 'createdAt', 'food_safety_metadata'];
+      let optionalFields = ['private_notes', 'tags', 'description', 'type', 'batchYield', 'batchYieldUnit', 'storage', 'allergens'];
       
       return data.keys().hasAll(requiredFields) &&
-             data.keys().hasOnly(allFields) &&
+             data.keys().hasOnly(requiredFields.concat(optionalFields)) &&
              data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
              (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
              data.base_yield_quantity is number && data.base_yield_quantity > 0 &&
@@ -86,13 +86,14 @@ service cloud.firestore {
              data.ingredients is list && data.ingredients.size() <= 100 &&
              data.steps is list && data.steps.size() <= 50 &&
              (!('tags' in data) || (data.tags is list && data.tags.size() <= 20)) &&
+             (!('allergens' in data) || (data.allergens is list && data.allergens.size() <= 10)) &&
              (!('private_notes' in data) || (data.private_notes is string && data.private_notes.size() <= 2000)) &&
+             (!('type' in data) || (data.type is string && data.type in ['menu', 'batch'])) &&
+             (!('batchYield' in data) || (data.batchYield is number)) &&
+             (!('batchYieldUnit' in data) || (data.batchYieldUnit is string)) &&
+             (!('storage' in data) || (data.storage is string)) &&
              data.authorUid is string &&
-             data.createdAt is timestamp &&
-             data.type in ['menu', 'batch'] &&
-             (!('batchYield' in data) || (data.batchYield is number && data.batchYield > 0)) &&
-             (!('batchYieldUnit' in data) || (data.batchYieldUnit in ['g', 'kg', 'ml', 'L', 'count'])) &&
-             (!('storage' in data) || (data.storage in ['fridge', 'ambient', 'freezer']));
+             data.createdAt is timestamp;
     }
 
     // ===============================================================

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, createContext, useContext } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useParams, useNavigate, Navigate } from "react-router-dom";
 import { 
   Search, 
@@ -24,14 +24,18 @@ import {
   Sun,
   Moon,
   ChevronDown,
-  Check
+  Check,
+  X,
+  Sparkle,
+  Zap,
+  Smartphone
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import ReactMarkdown from "react-markdown";
 import { GoogleGenAI } from "@google/genai";
-import { auth, db } from "./firebase";
+import { auth, db, isFirebaseConfigured } from "./firebase";
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -112,6 +116,126 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
+// --- Onboarding Component ---
+interface OnboardingStep {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+}
+
+const OnboardingModal = ({ onComplete }: { onComplete: () => void }) => {
+  const [currentStep, setCurrentStep] = useState(0);
+
+  const steps: OnboardingStep[] = [
+    {
+      title: "Welcome to the Vault",
+      description: "Your central hub for kitchen standards and precision prep. Access all recipes in one secure location.",
+      icon: <ChefHat className="w-10 h-10" />
+    },
+    {
+      title: "Vault AI Assistant",
+      description: "Meet your AI-powered kitchen companion. Ask about ingredients, prep steps, or station assignments for instant answers.",
+      icon: <Sparkles className="w-10 h-10" />
+    },
+    {
+      title: "Precision Scaling",
+      description: "Scale with confidence. Adjust portions or batch sizes instantly, and the vault will recalculate every ingredient for you.",
+      icon: <Scale className="w-10 h-10" />
+    },
+    {
+      title: "Kitchen-Proof Access",
+      description: "Install the vault as an app on your device to access every recipe even when the kitchen Wi-Fi goes down.",
+      icon: <Smartphone className="w-10 h-10" />
+    }
+  ];
+
+  const nextStep = () => {
+    if (currentStep < steps.length - 1) {
+      setCurrentStep(currentStep + 1);
+    } else {
+      onComplete();
+    }
+  };
+
+  const prevStep = () => {
+    if (currentStep > 0) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
+  return (
+    <div className="onboarding-overlay">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="onboarding-card"
+      >
+        <div className="onboarding-illustration">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentStep}
+              initial={{ opacity: 0, scale: 0.5, rotate: -10 }}
+              animate={{ opacity: 1, scale: 1, rotate: 0 }}
+              exit={{ opacity: 0, scale: 0.5, rotate: 10 }}
+              className="onboarding-icon-wrapper"
+            >
+              {steps[currentStep].icon}
+            </motion.div>
+          </AnimatePresence>
+          
+          {/* Decorative elements */}
+          <div className="absolute top-10 left-10 w-2 h-2 rounded-full bg-green/20 animate-pulse" />
+          <div className="absolute bottom-10 right-10 w-3 h-3 rounded-full bg-amber/20 animate-pulse delay-75" />
+          <div className="absolute top-20 right-20 w-1.5 h-1.5 rounded-full bg-text-3/20 animate-pulse delay-150" />
+        </div>
+
+        <div className="onboarding-content">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentStep}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              <h2 className="onboarding-title uppercase">{steps[currentStep].title}</h2>
+              <p className="onboarding-text">{steps[currentStep].description}</p>
+            </motion.div>
+          </AnimatePresence>
+
+          <div className="onboarding-footer">
+            <div className="onboarding-dots">
+              {steps.map((_, idx) => (
+                <div 
+                  key={idx} 
+                  className={cn("onboarding-dot", idx === currentStep && "active")} 
+                />
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              {currentStep > 0 && (
+                <button onClick={prevStep} className="onboarding-btn secondary uppercase">
+                  Back
+                </button>
+              )}
+              <button onClick={nextStep} className="onboarding-btn primary uppercase">
+                {currentStep === steps.length - 1 ? "Get Started" : "Next"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <button 
+          onClick={onComplete}
+          className="absolute top-4 right-4 p-2 text-text-3 hover:text-text-1 transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </motion.div>
+    </div>
+  );
+};
+
 // --- Theme Context ---
 type Theme = "dark" | "light";
 const ThemeContext = createContext<{
@@ -157,36 +281,57 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      if (user) {
-        // Check if user is admin (hardcoded for now or fetch from Firestore)
-        const adminEmail = "fatsogee8@gmail.com";
-        setIsAdmin(user.email === adminEmail);
-        
-        // Sync user profile to Firestore
-        const userRef = doc(db, "users", user.uid);
-        try {
-          await setDoc(userRef, {
-            displayName: user.displayName || "Anonymous Operator",
-            email: user.email,
-            role: user.email === adminEmail ? "admin" : "user"
-          }, { merge: true });
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
-        }
-      } else {
-        setIsAdmin(false);
-      }
+    const hasSeenOnboarding = localStorage.getItem("recipe-vault-onboarding-seen");
+    if (!hasSeenOnboarding) {
+      setShowOnboarding(true);
+    }
+
+    if (!isFirebaseConfigured) {
       setLoading(false);
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      try {
+        setUser(user);
+        if (user) {
+          // Check if user is admin (hardcoded for now or fetch from Firestore)
+          const adminEmail = "fatsogee8@gmail.com";
+          setIsAdmin(user.email === adminEmail);
+          
+          // Sync user profile to Firestore
+          const userRef = doc(db, "users", user.uid);
+          try {
+            await setDoc(userRef, {
+              displayName: user.displayName || "Anonymous Operator",
+              email: user.email,
+              role: user.email === adminEmail ? "admin" : "user"
+            }, { merge: true });
+          } catch (error) {
+            // Log error but don't block auth state completion
+            console.error('Failed to sync user profile to Firestore:', error);
+          }
+        } else {
+          setIsAdmin(false);
+        }
+      } finally {
+        setLoading(false);
+      }
     });
     return unsubscribe;
   }, []);
 
+  const handleOnboardingComplete = () => {
+    setShowOnboarding(false);
+    localStorage.setItem("recipe-vault-onboarding-seen", "true");
+  };
+
   return (
     <AuthContext.Provider value={{ user, loading, isAdmin }}>
+      {showOnboarding && user && <OnboardingModal onComplete={handleOnboardingComplete} />}
       {children}
     </AuthContext.Provider>
   );
@@ -221,6 +366,7 @@ interface Recipe {
   ingredients: Ingredient[];
   steps: string[];
   tags: string[];
+  allergens?: string[];
   private_notes?: string;
   authorUid: string;
   createdAt: Timestamp;
@@ -374,6 +520,9 @@ const Header = () => {
 };
 
 const RecipeCard = ({ recipe }: { recipe: Recipe }) => {
+  const [showPreview, setShowPreview] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(false);
+
   const formatHoldTime = (hours: number, minutes: number) => {
     if (hours === 0) return `${minutes}m`;
     if (minutes === 0) return `${hours}h`;
@@ -383,7 +532,93 @@ const RecipeCard = ({ recipe }: { recipe: Recipe }) => {
   const isBatch = recipe.type === 'batch';
 
   return (
-    <div className={cn("recipe-card group", isBatch && "batch-type")}>
+    <div 
+      className={cn("recipe-card group relative", isBatch && "batch-type")}
+      onMouseEnter={() => !isDismissed && setShowPreview(true)}
+      onMouseLeave={() => {
+        setShowPreview(false);
+        setIsDismissed(false);
+      }}
+    >
+      <AnimatePresence>
+        {showPreview && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            className="absolute inset-0 z-20 bg-surface/98 backdrop-blur-md border border-green/30 rounded-2xl p-5 overflow-y-auto shadow-2xl scrollbar-hide"
+          >
+            <div className="flex justify-between items-start mb-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-3 h-3 text-green animate-pulse" />
+                <h4 className="font-display text-[10px] font-bold text-green uppercase tracking-[0.2em]">Quick View</h4>
+              </div>
+              <button 
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowPreview(false);
+                  setIsDismissed(true);
+                }}
+                className="p-1.5 hover:bg-elevated rounded-full transition-colors border border-transparent hover:border-border"
+              >
+                <X className="w-3.5 h-3.5 text-text-3" />
+              </button>
+            </div>
+            
+            <div className="space-y-5">
+              <div>
+                <p className="text-[11px] text-text-2 leading-relaxed italic font-serif">"{recipe.description}"</p>
+              </div>
+              
+              <div className="space-y-2">
+                <p className="text-[9px] font-mono text-text-3 uppercase tracking-widest font-bold flex items-center gap-2">
+                  <span className="w-4 h-px bg-border" /> Ingredients
+                </p>
+                <ul className="text-[10px] text-text-2 space-y-1.5">
+                  {recipe.ingredients.slice(0, 4).map((ing, i) => (
+                    <li key={i} className="flex items-center gap-2">
+                      <div className="w-1 h-1 bg-green/40 rounded-full" />
+                      <span className="font-mono text-green/80">{ing.quantity}{ing.unit}</span>
+                      <span className="text-text-1">{ing.name}</span>
+                    </li>
+                  ))}
+                  {recipe.ingredients.length > 4 && (
+                    <li className="text-green font-mono text-[9px] pl-3">+ {recipe.ingredients.length - 4} more items</li>
+                  )}
+                </ul>
+              </div>
+              
+              <div className="space-y-2">
+                <p className="text-[9px] font-mono text-text-3 uppercase tracking-widest font-bold flex items-center gap-2">
+                  <span className="w-4 h-px bg-border" /> Method Preview
+                </p>
+                <ol className="text-[10px] text-text-2 space-y-2">
+                  {recipe.steps.slice(0, 2).map((step, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="text-green/50 font-mono">{i + 1}.</span>
+                      <span className="line-clamp-2">{step}</span>
+                    </li>
+                  ))}
+                  {recipe.steps.length > 2 && (
+                    <li className="text-green font-mono text-[9px] pl-5">+ {recipe.steps.length - 2} more steps</li>
+                  )}
+                </ol>
+              </div>
+            </div>
+            
+            <div className="mt-6 pt-4 border-t border-border flex justify-between items-center">
+              <span className="text-[8px] font-mono text-text-3 uppercase tracking-widest">Recipe ID: {recipe.id.slice(0, 8)}</span>
+              <Link 
+                to={`/recipe/${recipe.id}`}
+                className="text-[9px] font-mono text-green hover:underline uppercase tracking-widest font-bold flex items-center gap-1.5 group/link"
+              >
+                Full Vault Entry <ArrowRight className="w-3 h-3 transition-transform group-hover/link:translate-x-1" />
+              </Link>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="recipe-card-accent absolute left-0 top-0 bottom-0 w-[3px] bg-green" />
       <div className="p-[18px] pl-[22px]">
         <div className="flex justify-between items-start mb-3">
@@ -441,28 +676,10 @@ const QuickAISearch = () => {
   const [queryText, setQueryText] = useState("");
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const internalRef = useRef<HTMLTextAreaElement>(null);
 
-  const autoResize = () => {
-    if (internalRef.current) {
-      internalRef.current.style.height = 'auto';
-      internalRef.current.style.height = Math.min(internalRef.current.scrollHeight, 120) + 'px';
-    }
-  };
-
-  useEffect(() => {
-    autoResize();
-  }, [queryText]);
-
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!queryText.trim() || loading) return;
-
-    const currentQuery = queryText;
-    setQueryText("");
-    if (internalRef.current) {
-      internalRef.current.style.height = '44px';
-    }
 
     setLoading(true);
     setResult(null);
@@ -493,7 +710,7 @@ const QuickAISearch = () => {
         ${contextStr}
         
         USER QUESTION:
-        ${currentQuery}
+        ${queryText}
       `;
 
       const response = await ai.models.generateContent({
@@ -506,13 +723,6 @@ const QuickAISearch = () => {
       setResult("Error processing request. Please check your connection.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSearch();
     }
   };
 
@@ -529,14 +739,12 @@ const QuickAISearch = () => {
       </div>
 
       <form onSubmit={handleSearch} className="ai-input-row">
-        <textarea 
-          ref={internalRef}
+        <input 
+          type="text"
           value={queryText}
           onChange={(e) => setQueryText(e.target.value)}
-          onKeyDown={handleKeyDown}
           placeholder="Ask about prep, stations, or ingredients"
-          className="ai-input"
-          rows={1}
+          className="vault-assistant-input"
         />
         <button 
           type="submit" 
@@ -575,11 +783,287 @@ const QuickAISearch = () => {
   );
 };
 
+const ALLERGEN_COLORS: Record<string, string> = {
+  gluten: "bg-yellow-400",
+  dairy: "bg-red-500",
+  nuts: "bg-orange-500",
+  soy: "bg-purple-500",
+  shellfish: "bg-pink-500",
+  eggs: "bg-blue-400",
+  fish: "bg-cyan-500"
+};
+
+const STATION_COLORS: Record<string, string> = {
+  GRILL: "var(--color-amber)",
+  SAUTÉ: "var(--color-green)",
+  FRYER: "var(--color-red)",
+  PREP: "var(--color-blue)",
+  OTHER: "var(--color-text-3)"
+};
+
+const GridCard = ({ recipe }: { recipe: Recipe }) => {
+  const isBatch = recipe.type === 'batch';
+  const stationColor = STATION_COLORS[recipe.station_assignment.toUpperCase()] || STATION_COLORS.OTHER;
+
+  return (
+    <Link 
+      to={`/recipe/${recipe.id}`} 
+      className={cn("grid-card group", isBatch && "batch-type")}
+      style={{ borderColor: isBatch ? 'var(--color-amber)' : 'var(--color-border)' }}
+    >
+      <div 
+        className="grid-card-accent" 
+        style={{ backgroundColor: isBatch ? 'var(--color-amber)' : stationColor }}
+      />
+      <div className="grid-card-top">
+        <div className="flex justify-between items-start">
+          <div className="grid-card-tags">
+            <span 
+              className="grid-tag station uppercase"
+              style={{ color: stationColor, borderColor: stationColor, backgroundColor: `${stationColor}15` }}
+            >
+              {recipe.station_assignment}
+            </span>
+            <span className={cn("grid-tag category uppercase", isBatch && "batch")}>
+              {isBatch ? "⚙ BATCH" : "MENU"}
+            </span>
+          </div>
+          {recipe.allergens && recipe.allergens.length > 0 && (
+            <div className="flex gap-1 mt-1">
+              {recipe.allergens.map(allergen => (
+                <div 
+                  key={allergen} 
+                  className={cn("w-1.5 h-1.5 rounded-full", ALLERGEN_COLORS[allergen.toLowerCase()] || "bg-gray-400")}
+                  title={allergen}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        <h3 className="grid-card-name">{recipe.name}</h3>
+      </div>
+      {isBatch && <div className="grid-card-batch-icon">⚙</div>}
+    </Link>
+  );
+};
+
+const QuickReferenceDeck = ({ recipes, onClose, stationName }: { recipes: Recipe[], onClose: () => void, stationName: string }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [direction, setDirection] = useState(0);
+
+  const slideVariants = {
+    enter: (direction: number) => ({
+      x: direction > 0 ? 300 : -300,
+      opacity: 0,
+      scale: 0.8,
+      rotate: direction > 0 ? 10 : -10
+    }),
+    center: {
+      zIndex: 1,
+      x: 0,
+      opacity: 1,
+      scale: 1,
+      rotate: 0
+    },
+    exit: (direction: number) => ({
+      zIndex: 0,
+      x: direction < 0 ? 300 : -300,
+      opacity: 0,
+      scale: 0.8,
+      rotate: direction < 0 ? 10 : -10
+    })
+  };
+
+  const swipeConfidenceThreshold = 10000;
+  const swipePower = (offset: number, velocity: number) => {
+    return Math.abs(offset) * velocity;
+  };
+
+  const paginate = (newDirection: number) => {
+    if (currentIndex + newDirection >= 0 && currentIndex + newDirection < recipes.length) {
+      setDirection(newDirection);
+      setCurrentIndex(prev => prev + newDirection);
+    }
+  };
+
+  const currentRecipe = recipes[currentIndex];
+  const stationColor = STATION_COLORS[stationName.toUpperCase()] || STATION_COLORS.OTHER;
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-base/95 backdrop-blur-xl flex flex-col items-center justify-center p-6">
+      <div className="absolute top-8 left-8 flex items-center gap-3">
+        <div 
+          className="w-3 h-3 rounded-full animate-pulse" 
+          style={{ backgroundColor: stationColor }}
+        />
+        <h2 className="font-display text-xl font-bold uppercase tracking-widest text-text-1">
+          {stationName} <span className="text-text-3 ml-2">Briefing</span>
+        </h2>
+      </div>
+
+      <button 
+        onClick={onClose}
+        className="absolute top-8 right-8 p-3 bg-elevated border border-border rounded-full text-text-3 hover:text-text-1 transition-colors"
+      >
+        <X className="w-6 h-6" />
+      </button>
+
+      <div className="relative w-full max-w-md aspect-[3/4] flex items-center justify-center">
+        <AnimatePresence initial={false} custom={direction}>
+          <motion.div
+            key={currentIndex}
+            custom={direction}
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{
+              x: { type: "spring", stiffness: 300, damping: 30 },
+              opacity: { duration: 0.2 }
+            }}
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={1}
+            onDragEnd={(e, { offset, velocity }) => {
+              const swipe = swipePower(offset.x, velocity.x);
+
+              if (swipe < -swipeConfidenceThreshold) {
+                paginate(1);
+              } else if (swipe > swipeConfidenceThreshold) {
+                paginate(-1);
+              }
+            }}
+            className="absolute inset-0 bg-surface border border-border rounded-3xl p-8 shadow-2xl flex flex-col overflow-hidden"
+            style={{ borderLeft: `6px solid ${stationColor}` }}
+          >
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex flex-wrap gap-2">
+                {currentRecipe.tags.map(tag => (
+                  <span key={tag} className="text-[10px] font-mono font-bold text-text-3 border border-border px-2 py-0.5 rounded uppercase tracking-wider">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                {currentRecipe.allergens?.map(allergen => (
+                  <div 
+                    key={allergen} 
+                    className={cn("w-2 h-2 rounded-full", ALLERGEN_COLORS[allergen.toLowerCase()] || "bg-gray-400")}
+                    title={allergen}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <h3 className="font-display text-3xl font-bold text-text-1 mb-6 leading-tight">
+              {currentRecipe.name}
+            </h3>
+
+            <div className="space-y-6 flex-1 overflow-y-auto scrollbar-hide">
+              <div className="space-y-2">
+                <p className="text-[10px] font-mono text-text-3 uppercase tracking-widest font-bold">Critical Specs</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-elevated p-3 rounded-xl border border-border">
+                    <p className="text-[9px] font-mono text-text-3 uppercase mb-1">Min Temp</p>
+                    <p className="text-xl font-bold text-amber">{currentRecipe.food_safety_metadata.min_temp}°F</p>
+                  </div>
+                  <div className="bg-elevated p-3 rounded-xl border border-border">
+                    <p className="text-[9px] font-mono text-text-3 uppercase mb-1">Hold Time</p>
+                    <p className="text-xl font-bold text-text-1">
+                      {currentRecipe.food_safety_metadata.hold_time}h {currentRecipe.food_safety_metadata.hold_time_minutes}m
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-[10px] font-mono text-text-3 uppercase tracking-widest font-bold">Method Highlights</p>
+                <div className="space-y-3">
+                  {currentRecipe.steps.slice(0, 3).map((step, i) => (
+                    <div key={i} className="flex gap-3">
+                      <span className="text-text-3 font-mono text-sm">{i + 1}.</span>
+                      <p className="text-sm text-text-2 leading-relaxed">{step}</p>
+                    </div>
+                  ))}
+                  {currentRecipe.steps.length > 3 && (
+                    <p className="text-[10px] font-mono text-text-3 italic pl-7">+ {currentRecipe.steps.length - 3} more steps in full recipe</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-border flex justify-between items-center">
+              <p className="text-[10px] font-mono text-text-3 uppercase tracking-widest">
+                Card {currentIndex + 1} of {recipes.length}
+              </p>
+              <Link 
+                to={`/recipe/${currentRecipe.id}`}
+                className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest"
+                style={{ color: stationColor }}
+              >
+                Open Full Vault <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+      </div>
+
+      <div className="mt-12 flex items-center gap-8">
+        <button 
+          onClick={() => paginate(-1)}
+          disabled={currentIndex === 0}
+          className="p-4 bg-elevated border border-border rounded-full text-text-3 hover:text-text-1 disabled:opacity-20 transition-all"
+        >
+          <ArrowLeft className="w-6 h-6" />
+        </button>
+        <div className="flex gap-2">
+          {recipes.map((_, idx) => (
+            <div 
+              key={idx}
+              className={cn(
+                "w-1.5 h-1.5 rounded-full transition-all duration-300",
+                idx === currentIndex ? "w-6" : "bg-text-3"
+              )}
+              style={{ backgroundColor: idx === currentIndex ? stationColor : undefined }}
+            />
+          ))}
+        </div>
+        <button 
+          onClick={() => paginate(1)}
+          disabled={currentIndex === recipes.length - 1}
+          className="p-4 bg-elevated border border-border rounded-full text-text-3 hover:text-text-1 disabled:opacity-20 transition-all"
+        >
+          <ArrowRight className="w-6 h-6" />
+        </button>
+      </div>
+
+      <p className="mt-8 text-[10px] font-mono text-text-3 uppercase tracking-[0.2em] animate-pulse">
+        Swipe or use arrows to navigate
+      </p>
+    </div>
+  );
+};
+
+const STATION_ORDER = ['GRILL', 'SAUTÉ', 'FRYER', 'PREP', 'OTHER'];
+
 const RecipeList = () => {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [activeDeck, setActiveDeck] = useState<{ recipes: Recipe[], station: string } | null>(null);
+  const [collapsedStations, setCollapsedStations] = useState<Record<string, boolean>>(() => {
+    const saved = localStorage.getItem('rv-station-collapse');
+    return saved ? JSON.parse(saved) : {};
+  });
   const { user } = useAuth();
+
+  useEffect(() => {
+    localStorage.setItem('rv-station-collapse', JSON.stringify(collapsedStations));
+  }, [collapsedStations]);
+
+  const toggleStation = (station: string) => {
+    setCollapsedStations(prev => ({ ...prev, [station]: !prev[station] }));
+  };
 
   const allTags = useMemo(() => {
     const tags = new Set<string>();
@@ -591,6 +1075,26 @@ const RecipeList = () => {
     if (!selectedTag) return recipes;
     return recipes.filter(r => r.tags?.includes(selectedTag));
   }, [recipes, selectedTag]);
+
+  const groupedRecipes = useMemo(() => {
+    const grouped = filteredRecipes.reduce((acc, recipe) => {
+      const station = recipe.station_assignment?.toUpperCase() || 'OTHER';
+      if (!acc[station]) acc[station] = [];
+      acc[station].push(recipe);
+      return acc;
+    }, {} as Record<string, Recipe[]>);
+    return grouped;
+  }, [filteredRecipes]);
+
+  const stationsToRender = useMemo(() => {
+    const stations = STATION_ORDER.filter(s => groupedRecipes[s]?.length > 0);
+    Object.keys(groupedRecipes).forEach(s => {
+      if (!STATION_ORDER.includes(s) && groupedRecipes[s].length > 0) {
+        stations.push(s);
+      }
+    });
+    return stations;
+  }, [groupedRecipes]);
 
   useEffect(() => {
     const q = query(collection(db, "recipes"), orderBy("createdAt", "desc"));
@@ -619,10 +1123,10 @@ const RecipeList = () => {
             ],
             steps: ["Preheat grill to 450F", "Smash patty for 10 seconds", "Cook until 160F internal"],
             tags: ["Main Course", "Signature"],
+            allergens: ["gluten", "dairy"],
             private_notes: "Use the heavy press for better crust.",
             authorUid: user.uid,
-            createdAt: serverTimestamp(),
-            type: 'menu'
+            createdAt: serverTimestamp()
           },
           {
             name: "Truffle Fries",
@@ -638,10 +1142,10 @@ const RecipeList = () => {
             ],
             steps: ["Fry at 350F for 3.5 mins", "Toss with oil and cheese immediately"],
             tags: ["Appetizer", "Vegetarian"],
+            allergens: ["dairy"],
             private_notes: "Don't over-oil or they get soggy.",
             authorUid: user.uid,
-            createdAt: serverTimestamp(),
-            type: 'menu'
+            createdAt: serverTimestamp()
           }
         ];
         seedData.forEach(async (recipe) => {
@@ -707,18 +1211,64 @@ const RecipeList = () => {
       {/* Divider */}
       <div className="border-b border-border w-full mb-8" />
 
-      {/* Card Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-8">
-        {filteredRecipes.map(recipe => (
-          <RecipeCard key={recipe.id} recipe={recipe} />
-        ))}
+      {/* Station Sections */}
+      <div className="space-y-8">
+        {stationsToRender.map(station => {
+          const stationRecipes = groupedRecipes[station];
+          const isCollapsed = collapsedStations[station];
+          
+          return (
+            <div key={station} className={cn("station-section", isCollapsed && "collapsed")}>
+              <div 
+                className="station-header" 
+                onClick={() => toggleStation(station)}
+              >
+                <span className="station-header-name" style={{ color: STATION_COLORS[station] || STATION_COLORS.OTHER }}>{station}</span>
+                <div className="station-header-line" />
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveDeck({ recipes: stationRecipes, station });
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1 bg-elevated border border-border rounded-full text-[9px] font-mono font-bold text-text-2 hover:text-text-1 hover:border-border-hi transition-all mr-4"
+                >
+                  <Zap className="w-3 h-3" />
+                  BRIEFING
+                </button>
+                <span className="station-header-count">
+                  {stationRecipes.length} recipe{stationRecipes.length !== 1 ? 's' : ''}
+                </span>
+                <ChevronDown className="station-header-chevron w-3 h-3" />
+              </div>
+              
+              {!isCollapsed && (
+                <div className="station-grid">
+                  {stationRecipes.map(recipe => (
+                    <GridCard key={recipe.id} recipe={recipe} />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
         {filteredRecipes.length === 0 && (
-          <div className="col-span-full py-20 text-center border border-dashed border-border rounded-2xl">
+          <div className="py-20 text-center border border-dashed border-border rounded-2xl">
             <ChefHat className="w-12 h-12 text-text-3 mx-auto mb-4 opacity-20" />
             <p className="text-text-3 font-mono text-xs uppercase tracking-widest">No recipes found in the vault.</p>
           </div>
         )}
       </div>
+
+      <AnimatePresence>
+        {activeDeck && (
+          <QuickReferenceDeck 
+            recipes={activeDeck.recipes}
+            stationName={activeDeck.station}
+            onClose={() => setActiveDeck(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -740,6 +1290,7 @@ const RecipeForm = () => {
     ingredients: [],
     steps: [""],
     tags: [],
+    allergens: [],
     private_notes: "",
     type: 'menu',
     batchYield: 1000,
@@ -770,6 +1321,7 @@ const RecipeForm = () => {
               ingredients: data.ingredients,
               steps: data.steps,
               tags: data.tags || [],
+              allergens: data.allergens || [],
               private_notes: data.private_notes || "",
               type: data.type || 'menu',
               batchYield: data.batchYield || 1000,
@@ -1272,9 +1824,39 @@ const RecipeForm = () => {
             </div>
           </section>
 
-          {/* Private Notes */}
+          {/* Allergen Flags */}
           <section className="space-y-4">
-            <h4 className="text-[10px] font-mono text-text-3 uppercase tracking-[0.2em] border-b border-border pb-2">04. Categorization Tags</h4>
+            <h4 className="text-[10px] font-mono text-text-3 uppercase tracking-[0.2em] border-b border-border pb-2">04. Allergen Flags</h4>
+            <div className="flex flex-wrap gap-2">
+              {Object.keys(ALLERGEN_COLORS).map(allergen => (
+                <button
+                  key={allergen}
+                  type="button"
+                  onClick={() => {
+                    const allergens = formData.allergens || [];
+                    if (allergens.includes(allergen)) {
+                      setFormData({ ...formData, allergens: allergens.filter(a => a !== allergen) });
+                    } else {
+                      setFormData({ ...formData, allergens: [...allergens, allergen] });
+                    }
+                  }}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono text-[10px] uppercase tracking-widest transition-all",
+                    formData.allergens?.includes(allergen) 
+                      ? "bg-elevated border-text-3 text-text-1" 
+                      : "bg-surface border-border text-text-3 hover:border-border-hi"
+                  )}
+                >
+                  <div className={cn("w-2 h-2 rounded-full", ALLERGEN_COLORS[allergen])} />
+                  {allergen}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* Categorization Tags */}
+          <section className="space-y-4">
+            <h4 className="text-[10px] font-mono text-text-3 uppercase tracking-[0.2em] border-b border-border pb-2">05. Categorization Tags</h4>
             <div className="flex flex-wrap gap-2 mb-4">
               {formData.tags.map(tag => (
                 <span key={tag} className="flex items-center gap-1.5 px-3 py-1.5 bg-green/10 border border-green/20 rounded-lg text-green font-mono text-[10px] uppercase tracking-widest">
@@ -1323,7 +1905,7 @@ const RecipeForm = () => {
 
           {/* Private Notes */}
           <section className="space-y-4">
-            <h4 className="text-[10px] font-mono text-amber uppercase tracking-[0.2em] border-b border-amber/20 pb-2">05. Managerial Notes (Private)</h4>
+            <h4 className="text-[10px] font-mono text-amber uppercase tracking-[0.2em] border-b border-amber/20 pb-2">06. Managerial Notes (Private)</h4>
             <textarea 
               rows={3}
               value={formData.private_notes}
@@ -1395,6 +1977,7 @@ const RecipeDetail = () => {
 
   const canSeePrivateNotes = isAdmin || recipe.authorUid === user?.uid;
   const isBatch = recipe.type === 'batch';
+  const stationColor = STATION_COLORS[recipe.station_assignment.toUpperCase()] || STATION_COLORS.OTHER;
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-12 w-full box-sizing-border-box">
@@ -1403,16 +1986,38 @@ const RecipeDetail = () => {
         Back to Vault
       </Link>
 
-      <div className={cn("bg-surface border border-border rounded-2xl overflow-hidden w-full box-sizing-border-box", isBatch && "border-amber/30 shadow-amber/5")}>
-        <div className={cn("detail-header", isBatch && "bg-amber/5")}>
+      <div 
+        className={cn("bg-surface border border-border rounded-2xl overflow-hidden w-full box-sizing-border-box", isBatch && "shadow-amber/5")}
+        style={{ borderColor: isBatch ? 'var(--color-amber)' : 'var(--color-border)' }}
+      >
+        <div 
+          className={cn("detail-header", isBatch && "bg-amber/5")}
+          style={{ borderLeft: `8px solid ${isBatch ? 'var(--color-amber)' : stationColor}` }}
+        >
           {/* Row 1 */}
           <div className="detail-header-top">
             <div className="flex items-center gap-3">
-              <span className="detail-station-tag">{recipe.station_assignment} Station</span>
+              <span 
+                className="detail-station-tag"
+                style={{ color: stationColor, borderColor: stationColor, backgroundColor: `${stationColor}15` }}
+              >
+                {recipe.station_assignment} Station
+              </span>
               {isBatch && (
                 <span className="batch-type-badge">
                   <span>⚙</span> BATCH
                 </span>
+              )}
+              {recipe.allergens && recipe.allergens.length > 0 && (
+                <div className="flex gap-1.5 ml-2">
+                  {recipe.allergens.map(allergen => (
+                    <div 
+                      key={allergen} 
+                      className={cn("w-2 h-2 rounded-full", ALLERGEN_COLORS[allergen.toLowerCase()] || "bg-gray-400")}
+                      title={allergen}
+                    />
+                  ))}
+                </div>
               )}
             </div>
             <div className="safety-block">
@@ -1836,6 +2441,29 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 };
 
 export default function App() {
+  if (!isFirebaseConfigured) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-base">
+        <div className="max-w-md w-full bg-surface border border-red/30 rounded-2xl p-8 text-center shadow-2xl">
+          <div className="w-16 h-16 bg-red/10 border border-red/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Info className="w-10 h-10 text-red" />
+          </div>
+          <h2 className="text-2xl font-extrabold tracking-tight text-text-1 font-display uppercase mb-2">Configuration Required</h2>
+          <p className="text-text-3 font-mono text-xs uppercase tracking-widest mb-8">Firebase setup incomplete</p>
+          <div className="text-sm text-text-2 mb-8 leading-relaxed">
+            The application is missing critical Firebase credentials. Please configure the following in the <strong>Secrets Panel</strong> (Settings menu):
+            <ul className="mt-4 text-left space-y-1 font-mono text-[10px] bg-base/50 p-4 rounded-lg border border-border">
+              <li>VITE_FIREBASE_API_KEY</li>
+              <li>VITE_FIREBASE_PROJECT_ID</li>
+              <li>VITE_FIREBASE_AUTH_DOMAIN</li>
+              <li>VITE_FIREBASE_APP_ID</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ThemeProvider>
       <div className="min-h-screen bg-base text-text-1 selection:bg-green/30 transition-colors duration-300">
