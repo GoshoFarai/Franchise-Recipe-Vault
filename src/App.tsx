@@ -36,6 +36,7 @@ import { twMerge } from "tailwind-merge";
 import ReactMarkdown from "react-markdown";
 import { GoogleGenAI } from "@google/genai";
 import { auth, db, isFirebaseConfigured } from "./firebase";
+import { InstallPrompt } from "./components/InstallPrompt";
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -380,7 +381,6 @@ interface Recipe {
 
 const Header = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const { user, isAdmin } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -391,12 +391,6 @@ const Header = () => {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    const handleBeforeInstallPrompt = (e: any) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
     const handleOutsideClick = () => {
       setIsDropdownOpen(false);
     };
@@ -405,18 +399,9 @@ const Header = () => {
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('click', handleOutsideClick);
     };
   }, []);
-
-  const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log('Install outcome:', outcome);
-    setDeferredPrompt(null);
-  };
 
   const handleLogout = () => signOut(auth);
 
@@ -501,14 +486,7 @@ const Header = () => {
       {/* Row 2 — actions */}
       <div className="header-row-2">
         <div className="flex items-center gap-3">
-          {deferredPrompt && (
-            <button 
-              onClick={handleInstallClick}
-              className="status-pill uppercase hover:bg-green/20 transition-colors"
-            >
-              ↓ INSTALL
-            </button>
-          )}
+          <InstallPrompt />
           <div className="status-pill uppercase">
             <div className={cn("status-dot", !isOnline && "bg-red-500 shadow-[0_0_6px_#ef4444] animate-none")} />
             <span>{isOnline ? "Online" : "Offline Mode"}</span>
