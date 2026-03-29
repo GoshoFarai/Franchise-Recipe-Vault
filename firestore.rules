@@ -65,17 +65,20 @@ service cloud.firestore {
     }
 
     function isApproved() {
-      return isAuthenticated() && 
+      return isDefaultAdmin() || (isAuthenticated() && 
              exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-             getUserData().status == 'approved';
+             (!('status' in getUserData()) || getUserData().status == 'approved'));
     }
 
     function hasRole(role) {
-      return isApproved() && getUserData().role == role;
+      return isApproved() && (
+        (!('role' in getUserData()) && role == 'admin') || 
+        ('role' in getUserData() && getUserData().role == role)
+      );
     }
 
     function isAdmin() {
-      return hasRole('admin') || isDefaultAdmin();
+      return isDefaultAdmin() || hasRole('admin');
     }
 
     function isManager() {

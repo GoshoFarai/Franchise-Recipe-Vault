@@ -359,8 +359,9 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
-        setUser(firebaseUser);
         if (firebaseUser) {
+          setLoading(true);
+          setUser(firebaseUser);
           // We don't auto-create the user document here anymore.
           // That is handled in the post-login flow.
           // We just listen to the user document if it exists.
@@ -371,10 +372,45 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             const isDefaultAdmin = firebaseUser.email === "fatsogee8@gmail.com";
             if (docSnap.exists()) {
               const userData = docSnap.data();
+              
+              // Handle legacy users who don't have a status/role
+              if (!userData.status) {
+                userData.status = 'approved';
+                if (!userData.role) userData.role = 'admin'; // Give legacy users admin access
+                
+                // If they are the default admin, they have permission to update their own document
+                if (isDefaultAdmin) {
+                  updateDoc(userRef, {
+                    status: 'approved',
+                    role: 'admin'
+                  }).catch(console.error);
+                }
+              }
+              
               const appUser = { ...firebaseUser, ...userData } as AppUser;
               setCurrentUser(appUser);
               setIsAdmin(appUser.role === 'admin' || isDefaultAdmin);
             } else {
+              if (isDefaultAdmin) {
+                // Auto-create document for default admin
+                setDoc(userRef, {
+                  uid: firebaseUser.uid,
+                  email: firebaseUser.email,
+                  displayName: firebaseUser.displayName || firebaseUser.email,
+                  requestedRole: 'admin',
+                  role: 'admin',
+                  status: 'approved',
+                  createdAt: serverTimestamp(),
+                  approvedAt: serverTimestamp(),
+                  approvedBy: 'system',
+                }).catch((error) => {
+                  console.error("Error creating default admin:", error);
+                  setLoading(false);
+                });
+                // Don't set loading to false here. 
+                // Wait for the snapshot to re-fire once the document is created.
+                return;
+              }
               setCurrentUser(firebaseUser as AppUser);
               setIsAdmin(isDefaultAdmin);
             }
@@ -386,6 +422,7 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           
           return () => unsubDoc();
         } else {
+          setUser(null);
           setCurrentUser(null);
           setIsAdmin(false);
           setLoading(false);
@@ -2454,10 +2491,16 @@ const RequestAccess = () => {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!loading && currentUser?.status) {
+    if (!loading && !user) {
+      navigate("/login");
+    } else if (!loading && currentUser?.status === 'approved') {
       navigate("/");
+    } else if (!loading && currentUser?.status === 'pending') {
+      navigate("/pending-approval");
+    } else if (!loading && currentUser?.status === 'rejected') {
+      navigate("/access-rejected");
     }
-  }, [currentUser, loading, navigate]);
+  }, [user, currentUser, loading, navigate]);
 
   const submitAccessRequest = async () => {
     if (!user || !selectedRole) return;
@@ -2515,12 +2558,12 @@ const RequestAccess = () => {
               key={role.id}
               onClick={() => setSelectedRole(role.id)}
               className={cn(
-                "role-card",
-                selectedRole === role.id && "selected"
+                "p-4 border rounded-xl cursor-pointer transition-all hover:border-green hover:bg-green/5",
+                selectedRole === role.id ? "border-green bg-green/10" : "border-border bg-surface"
               )}
             >
-              <h3 className="role-card-title">{role.title}</h3>
-              <p className="role-card-desc">{role.desc}</p>
+              <h3 className="font-mono text-sm font-bold text-text-1 mb-1">{role.title}</h3>
+              <p className="font-body text-xs text-text-2">{role.desc}</p>
             </div>
           ))}
         </div>
