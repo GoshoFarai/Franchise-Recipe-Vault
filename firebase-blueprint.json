@@ -64,6 +64,18 @@
         "role": { "type": "string", "enum": ["admin", "user"] }
       },
       "required": ["displayName", "email", "role"]
+    },
+    "PrepTask": {
+      "title": "Prep Task",
+      "description": "A daily preparation task",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "status": { "type": "string", "enum": ["not-started", "in-progress", "done"] },
+        "authorUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "status", "authorUid", "createdAt"]
     }
   },
   "firestore": {
@@ -74,6 +86,10 @@
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "User profiles"
+    },
+    "/prep_tasks/{taskId}": {
+      "schema": "PrepTask",
+      "description": "Collection of daily prep tasks"
     }
   }
 }

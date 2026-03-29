@@ -8,9 +8,15 @@ service cloud.firestore {
     // Collection: users
     // Document ID: userId
     // Fields:
-    //   - displayName: string (required, 1-100 chars)
+    //   - uid: string (required)
     //   - email: string (required, valid email)
-    //   - role: string (required, ['admin', 'user'])
+    //   - displayName: string (required)
+    //   - requestedRole: string (required, ['admin', 'manager', 'chef', 'staff'])
+    //   - role: string (optional, ['admin', 'manager', 'chef', 'staff'])
+    //   - status: string (required, ['pending', 'approved', 'rejected'])
+    //   - createdAt: timestamp (required)
+    //   - approvedAt: timestamp (optional)
+    //   - approvedBy: string (optional)
     //
     // Collection: recipes
     // Document ID: recipeId
@@ -50,21 +56,76 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isAdmin() {
+    function isDefaultAdmin() {
+      return isAuthenticated() && request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isApproved() {
       return isAuthenticated() && 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true));
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData().status == 'approved';
+    }
+
+    function hasRole(role) {
+      return isApproved() && getUserData().role == role;
+    }
+
+    function isAdmin() {
+      return hasRole('admin') || isDefaultAdmin();
+    }
+
+    function isManager() {
+      return hasRole('manager');
+    }
+
+    function isChef() {
+      return hasRole('chef');
+    }
+
+    function isStaff() {
+      return hasRole('staff');
+    }
+
+    function canManageUsers() {
+      return isAdmin() || isManager();
+    }
+
+    function canEditRecipes() {
+      return isAdmin() || isManager();
+    }
+
+    function canDeleteRecipes() {
+      return isAdmin();
     }
 
     function isValidEmail(email) {
       return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
 
-    function isValidUser(data) {
-      return data.keys().hasOnly(['displayName', 'email', 'role']) &&
-             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+    function isValidUserCreate(data, userId) {
+      let isDefault = isDefaultAdmin();
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'requestedRole', 'status', 'createdAt']) &&
+             data.uid == userId &&
              isValidEmail(data.email) &&
-             data.role in ['admin', 'user'];
+             data.displayName is string &&
+             data.requestedRole in ['admin', 'manager', 'chef', 'staff'] &&
+             data.createdAt is timestamp &&
+             (
+               (!isDefault && data.status == 'pending' && (!('role' in data) || data.role == null)) ||
+               (isDefault && data.status == 'approved' && data.role == 'admin')
+             );
+    }
+
+    function isValidUserUpdate(data, resourceData) {
+      return data.uid == resourceData.uid &&
+             data.email == resourceData.email &&
+             data.createdAt == resourceData.createdAt &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             (!('role' in data) || data.role == null || data.role in ['admin', 'manager', 'chef', 'staff']);
     }
 
     function isValidRecipe(data) {
@@ -101,19 +162,18 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
-                      (request.resource.data.role == 'user' || 
-                       (request.resource.data.role == 'admin' && request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true));
-      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
+      allow read: if isOwner(userId) || canManageUsers();
+      allow create: if isOwner(userId) && isValidUserCreate(request.resource.data, userId);
+      allow update: if canManageUsers() && isValidUserUpdate(request.resource.data, resource.data) &&
+                      (isAdmin() || (isManager() && request.resource.data.role != 'admin' && resource.data.role != 'admin'));
     }
 
     match /recipes/{recipeId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidRecipe(request.resource.data) && request.resource.data.authorUid == request.auth.uid;
-      allow update: if isAuthenticated() && isValidRecipe(request.resource.data) && 
-                      ((resource.data.authorUid == request.auth.uid && request.resource.data.authorUid == resource.data.authorUid && request.resource.data.createdAt == resource.data.createdAt) || isAdmin());
-      allow delete: if isAuthenticated() && (resource.data.authorUid == request.auth.uid || isAdmin());
+      allow read: if isApproved();
+      allow create: if canEditRecipes() && isValidRecipe(request.resource.data) && request.resource.data.authorUid == request.auth.uid;
+      allow update: if canEditRecipes() && isValidRecipe(request.resource.data) && 
+                      request.resource.data.authorUid == resource.data.authorUid && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if canDeleteRecipes();
     }
   }
 }
