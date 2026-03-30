@@ -57,8 +57,7 @@ import {
   serverTimestamp, 
   Timestamp,
   setDoc,
-  deleteDoc,
-  updateDoc
+  deleteDoc
 } from "firebase/firestore";
 
 // --- Utility ---
@@ -238,59 +237,6 @@ const OnboardingModal = ({ onComplete }: { onComplete: () => void }) => {
   );
 };
 
-// --- Permissions & RBAC ---
-const PERMISSIONS = {
-  admin: {
-    viewRecipes: true,
-    editRecipes: true,
-    deleteRecipes: true,
-    manageUsers: true,
-    approvePrepTasks: true,
-    useAssistant: true,
-    viewAnalytics: true,
-  },
-  manager: {
-    viewRecipes: true,
-    editRecipes: true,
-    deleteRecipes: false,
-    manageUsers: true,
-    approvePrepTasks: true,
-    useAssistant: true,
-    viewAnalytics: false,
-  },
-  chef: {
-    viewRecipes: true,
-    editRecipes: false,
-    deleteRecipes: false,
-    manageUsers: false,
-    approvePrepTasks: false,
-    useAssistant: true,
-    viewAnalytics: false,
-  },
-  staff: {
-    viewRecipes: true,
-    editRecipes: false,
-    deleteRecipes: false,
-    manageUsers: false,
-    approvePrepTasks: false,
-    useAssistant: false,
-    viewAnalytics: false,
-  },
-};
-
-function Can({
-  permission,
-  children
-}: {
-  permission: keyof typeof PERMISSIONS.admin,
-  children: React.ReactNode
-}) {
-  const { currentUser } = useAuth();
-  const role = currentUser?.role as keyof typeof PERMISSIONS | undefined;
-  if (!role || !PERMISSIONS[role]?.[permission]) return null;
-  return <>{children}</>;
-}
-
 // --- Theme Context ---
 type Theme = "dark" | "light";
 const ThemeContext = createContext<{
@@ -324,24 +270,16 @@ const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
 const useTheme = () => useContext(ThemeContext);
 
 // --- Auth Context ---
-export interface AppUser extends User {
-  role?: 'admin' | 'manager' | 'chef' | 'staff' | null;
-  status?: 'pending' | 'approved' | 'rejected';
-  requestedRole?: string;
-}
-
 interface AuthContextType {
   user: User | null;
-  currentUser: AppUser | null;
   loading: boolean;
   isAdmin: boolean;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, currentUser: null, loading: true, isAdmin: false });
+const AuthContext = createContext<AuthContextType>({ user: null, loading: true, isAdmin: false });
 
 const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -357,78 +295,30 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       try {
-        if (firebaseUser) {
-          setLoading(true);
-          setUser(firebaseUser);
-          // We don't auto-create the user document here anymore.
-          // That is handled in the post-login flow.
-          // We just listen to the user document if it exists.
-          const userRef = doc(db, "users", firebaseUser.uid);
+        setUser(user);
+        if (user) {
+          // Check if user is admin (hardcoded for now or fetch from Firestore)
+          const adminEmail = "fatsogee8@gmail.com";
+          setIsAdmin(user.email === adminEmail);
           
-          // Listen to user document changes
-          const unsubDoc = onSnapshot(userRef, (docSnap) => {
-            const isDefaultAdmin = firebaseUser.email === "fatsogee8@gmail.com";
-            if (docSnap.exists()) {
-              const userData = docSnap.data();
-              
-              // Handle legacy users who don't have a status/role
-              if (!userData.status) {
-                userData.status = 'approved';
-                if (!userData.role) userData.role = 'admin'; // Give legacy users admin access
-                
-                // If they are the default admin, they have permission to update their own document
-                if (isDefaultAdmin) {
-                  updateDoc(userRef, {
-                    status: 'approved',
-                    role: 'admin'
-                  }).catch(console.error);
-                }
-              }
-              
-              const appUser = { ...firebaseUser, ...userData } as AppUser;
-              setCurrentUser(appUser);
-              setIsAdmin(appUser.role === 'admin' || isDefaultAdmin);
-            } else {
-              if (isDefaultAdmin) {
-                // Auto-create document for default admin
-                setDoc(userRef, {
-                  uid: firebaseUser.uid,
-                  email: firebaseUser.email,
-                  displayName: firebaseUser.displayName || firebaseUser.email,
-                  requestedRole: 'admin',
-                  role: 'admin',
-                  status: 'approved',
-                  createdAt: serverTimestamp(),
-                  approvedAt: serverTimestamp(),
-                  approvedBy: 'system',
-                }).catch((error) => {
-                  console.error("Error creating default admin:", error);
-                  setLoading(false);
-                });
-                // Don't set loading to false here. 
-                // Wait for the snapshot to re-fire once the document is created.
-                return;
-              }
-              setCurrentUser(firebaseUser as AppUser);
-              setIsAdmin(isDefaultAdmin);
-            }
-            setLoading(false);
-          }, (error) => {
-            console.error("Error fetching user data:", error);
-            setLoading(false);
-          });
-          
-          return () => unsubDoc();
+          // Sync user profile to Firestore
+          const userRef = doc(db, "users", user.uid);
+          try {
+            await setDoc(userRef, {
+              displayName: user.displayName || "Anonymous Operator",
+              email: user.email,
+              role: user.email === adminEmail ? "admin" : "user"
+            }, { merge: true });
+          } catch (error) {
+            // Log error but don't block auth state completion
+            console.error('Failed to sync user profile to Firestore:', error);
+          }
         } else {
-          setUser(null);
-          setCurrentUser(null);
           setIsAdmin(false);
-          setLoading(false);
         }
-      } catch (error) {
-        console.error("Auth state change error:", error);
+      } finally {
         setLoading(false);
       }
     });
@@ -441,7 +331,7 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, currentUser, loading, isAdmin }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin }}>
       {showOnboarding && user && <OnboardingModal onComplete={handleOnboardingComplete} />}
       {children}
     </AuthContext.Provider>
@@ -492,7 +382,7 @@ interface Recipe {
 const Header = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const { user, currentUser, isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
@@ -558,15 +448,8 @@ const Header = () => {
           <div className={cn("user-dropdown", isDropdownOpen && "open")}>
             <div className="dropdown-user-info">
               <div className="dropdown-user-name">{user.displayName}</div>
-              <div className="dropdown-user-role uppercase">{currentUser?.role || "OPERATOR"}</div>
+              <div className="dropdown-user-role uppercase">{isAdmin ? "ADMIN" : "OPERATOR"}</div>
             </div>
-
-            <Can permission="manageUsers">
-              <Link to="/users" className="dropdown-item" onClick={() => setIsDropdownOpen(false)}>
-                <span className="dropdown-item-icon">👥</span>
-                <span>MANAGE USERS</span>
-              </Link>
-            </Can>
 
             <button 
               className="dropdown-item"
@@ -1263,9 +1146,7 @@ const RecipeList = () => {
   return (
     <div className="page-container max-w-7xl mx-auto px-5 pb-12 w-full box-sizing-border-box overflow-x-hidden">
       {/* AI Search Integration */}
-      <Can permission="useAssistant">
-        <QuickAISearch />
-      </Can>
+      <QuickAISearch />
 
       {/* Row 2: Meta Info */}
       <div className="flex flex-col md:flex-row md:items-center justify-between w-full mb-8 gap-4">
@@ -1296,15 +1177,13 @@ const RecipeList = () => {
 
       {/* Row 3: Action Row */}
       <div className="w-full mb-6">
-        <Can permission="editRecipes">
-          <Link 
-            to="/add" 
-            className="btn-new-recipe inline-flex items-center gap-[6px] bg-green hover:bg-green/80 text-black rounded-lg transition-all whitespace-nowrap border-none cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>NEW RECIPE</span>
-          </Link>
-        </Can>
+        <Link 
+          to="/add" 
+          className="btn-new-recipe inline-flex items-center gap-[6px] bg-green hover:bg-green/80 text-black rounded-lg transition-all whitespace-nowrap border-none cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          <span>NEW RECIPE</span>
+        </Link>
       </div>
 
       {/* Divider */}
@@ -2144,18 +2023,18 @@ const RecipeDetail = () => {
 
           {/* Row 3 */}
           <div className="detail-actions">
-            <Can permission="editRecipes">
-              <Link to={`/edit/${recipe.id}`} className="action-btn edit">
-                <Edit3 className="w-3.5 h-3.5" />
-                EDIT RECIPE
-              </Link>
-            </Can>
-            <Can permission="deleteRecipes">
-              <button onClick={handleDelete} className="action-btn delete">
-                <Trash2 className="w-3.5 h-3.5" />
-                DELETE RECIPE
-              </button>
-            </Can>
+            {canSeePrivateNotes && (
+              <>
+                <Link to={`/edit/${recipe.id}`} className="action-btn edit">
+                  <Edit3 className="w-3.5 h-3.5" />
+                  EDIT RECIPE
+                </Link>
+                <button onClick={handleDelete} className="action-btn delete">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  DELETE RECIPE
+                </button>
+              </>
+            )}
           </div>
 
           {/* Row 4 */}
@@ -2484,170 +2363,6 @@ const AISearch = () => {
   );
 };
 
-const RequestAccess = () => {
-  const { user, currentUser, loading } = useAuth();
-  const navigate = useNavigate();
-  const [selectedRole, setSelectedRole] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!loading && !user) {
-      navigate("/login");
-    } else if (!loading && currentUser?.status === 'approved') {
-      navigate("/");
-    } else if (!loading && currentUser?.status === 'pending') {
-      navigate("/pending-approval");
-    } else if (!loading && currentUser?.status === 'rejected') {
-      navigate("/access-rejected");
-    }
-  }, [user, currentUser, loading, navigate]);
-
-  const submitAccessRequest = async () => {
-    if (!user || !selectedRole) return;
-    setSubmitting(true);
-    try {
-      const isDefaultAdmin = user.email === "fatsogee8@gmail.com";
-      
-      await setDoc(doc(db, 'users', user.uid), {
-        uid: user.uid,
-        email: user.email,
-        displayName: user.displayName || user.email,
-        requestedRole: selectedRole,
-        role: isDefaultAdmin ? 'admin' : null,
-        status: isDefaultAdmin ? 'approved' : 'pending',
-        createdAt: serverTimestamp(),
-        approvedAt: isDefaultAdmin ? serverTimestamp() : null,
-        approvedBy: isDefaultAdmin ? 'system' : null,
-      });
-      
-      if (isDefaultAdmin) {
-        navigate('/');
-      } else {
-        navigate('/pending-approval');
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-green" /></div>;
-
-  const roles = [
-    { id: 'admin', title: 'ADMIN', desc: 'Full access, manage everything' },
-    { id: 'manager', title: 'MANAGER', desc: 'Add recipes, approve staff' },
-    { id: 'chef', title: 'CHEF', desc: 'View recipes, use assistant' },
-    { id: 'staff', title: 'STAFF', desc: 'View only' }
-  ];
-
-  return (
-    <div className="min-h-[calc(100vh-64px)] flex items-center justify-center px-4">
-      <div className="max-w-md w-full bg-surface border border-border rounded-2xl p-8 shadow-2xl">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-green-bg border border-green-dim rounded-2xl flex items-center justify-center mx-auto mb-6">
-            <ChefHat className="w-10 h-10 text-green" />
-          </div>
-          <h2 className="text-2xl font-extrabold tracking-tight text-text-1 font-display uppercase mb-2">Request Access</h2>
-          <p className="text-text-3 font-mono text-xs uppercase tracking-widest">Select your role to request access to the vault</p>
-        </div>
-
-        <div className="space-y-3 mb-8">
-          {roles.map(role => (
-            <div 
-              key={role.id}
-              onClick={() => setSelectedRole(role.id)}
-              className={cn(
-                "p-4 border rounded-xl cursor-pointer transition-all hover:border-green hover:bg-green/5",
-                selectedRole === role.id ? "border-green bg-green/10" : "border-border bg-surface"
-              )}
-            >
-              <h3 className="font-mono text-sm font-bold text-text-1 mb-1">{role.title}</h3>
-              <p className="font-body text-xs text-text-2">{role.desc}</p>
-            </div>
-          ))}
-        </div>
-
-        <button 
-          onClick={submitAccessRequest}
-          disabled={!selectedRole || submitting}
-          className="w-full flex items-center justify-center gap-3 bg-green hover:bg-green/80 disabled:opacity-50 disabled:hover:bg-green text-black px-6 py-4 rounded-xl font-mono text-sm font-bold uppercase tracking-widest transition-all"
-        >
-          {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "REQUEST ACCESS"}
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const PendingApproval = () => {
-  const { user, currentUser, loading } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!loading && currentUser?.status === 'approved') {
-      navigate("/");
-    }
-    if (!loading && currentUser?.status === 'rejected') {
-      navigate("/access-rejected");
-    }
-  }, [currentUser, loading, navigate]);
-
-  const handleLogout = () => signOut(auth);
-
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-green" /></div>;
-
-  return (
-    <div className="min-h-[calc(100vh-64px)] flex items-center justify-center px-4">
-      <div className="max-w-md w-full bg-surface border border-border rounded-2xl p-8 text-center shadow-2xl">
-        <div className="w-16 h-16 bg-amber/10 border border-amber/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
-          <Clock className="w-10 h-10 text-amber" />
-        </div>
-        <h2 className="text-2xl font-extrabold tracking-tight text-text-1 font-display uppercase mb-2">Access Pending</h2>
-        <p className="text-text-2 font-body text-sm leading-relaxed mb-8">
-          Your request for <span className="font-bold text-amber uppercase">{currentUser?.requestedRole}</span> access has been submitted.<br/>
-          An admin or manager will review your request shortly.
-        </p>
-        
-        <button 
-          onClick={handleLogout}
-          className="w-full flex items-center justify-center gap-3 bg-elevated hover:bg-border text-text-1 px-6 py-4 rounded-xl font-mono text-sm font-bold uppercase tracking-widest transition-all"
-        >
-          <LogOut className="w-5 h-5" />
-          Sign Out
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const AccessRejected = () => {
-  const handleLogout = () => signOut(auth);
-
-  return (
-    <div className="min-h-[calc(100vh-64px)] flex items-center justify-center px-4">
-      <div className="max-w-md w-full bg-surface border border-border rounded-2xl p-8 text-center shadow-2xl">
-        <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
-          <X className="w-10 h-10 text-red-500" />
-        </div>
-        <h2 className="text-2xl font-extrabold tracking-tight text-text-1 font-display uppercase mb-2">Access Denied</h2>
-        <p className="text-text-2 font-body text-sm leading-relaxed mb-8">
-          Your access request was not approved.<br/>
-          Contact your manager if you believe this is a mistake.
-        </p>
-        
-        <button 
-          onClick={handleLogout}
-          className="w-full flex items-center justify-center gap-3 bg-elevated hover:bg-border text-text-1 px-6 py-4 rounded-xl font-mono text-sm font-bold uppercase tracking-widest transition-all"
-        >
-          <LogOut className="w-5 h-5" />
-          Sign Out
-        </button>
-      </div>
-    </div>
-  );
-};
-
 const Login = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
@@ -2697,182 +2412,10 @@ const Login = () => {
 };
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, currentUser, loading } = useAuth();
+  const { user, loading } = useAuth();
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-green" /></div>;
   if (!user) return <Navigate to="/login" />;
-  
-  // If user is logged in but has no role/status, they need to request access
-  if (!currentUser?.status) {
-    return <Navigate to="/request-access" />;
-  }
-  
-  if (currentUser.status === 'pending') {
-    return <Navigate to="/pending-approval" />;
-  }
-  
-  if (currentUser.status === 'rejected') {
-    return <Navigate to="/access-rejected" />;
-  }
-
   return <>{children}</>;
-};
-
-const UserManagement = () => {
-  const { currentUser } = useAuth();
-  const [users, setUsers] = useState<AppUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'pending' | 'approved'>('pending');
-
-  useEffect(() => {
-    const q = query(collection(db, 'users'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const usersData = snapshot.docs.map(doc => ({
-        ...doc.data()
-      })) as AppUser[];
-      setUsers(usersData);
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'users');
-      setLoading(false);
-    });
-    return unsubscribe;
-  }, []);
-
-  const approveUser = async (targetUid: string, requestedRole: string) => {
-    if (!currentUser) return;
-    if (currentUser.role === 'manager' && requestedRole === 'admin') {
-      alert("Managers cannot approve admin requests.");
-      return;
-    }
-    try {
-      await updateDoc(doc(db, 'users', targetUid), {
-        role: requestedRole,
-        status: 'approved',
-        approvedAt: serverTimestamp(),
-        approvedBy: currentUser.uid,
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
-    }
-  };
-
-  const rejectUser = async (targetUid: string) => {
-    try {
-      await updateDoc(doc(db, 'users', targetUid), {
-        status: 'rejected',
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
-    }
-  };
-
-  const removeUser = async (targetUid: string) => {
-    if (!window.confirm("Are you sure you want to remove this user's access?")) return;
-    try {
-      await updateDoc(doc(db, 'users', targetUid), {
-        role: null,
-        status: 'rejected',
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
-    }
-  };
-
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-green" /></div>;
-
-  const pendingUsers = users.filter(u => u.status === 'pending');
-  const approvedUsers = users.filter(u => u.status === 'approved');
-
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-12 w-full box-sizing-border-box">
-      <div className="flex items-center gap-4 mb-8">
-        <div className="w-[44px] h-[44px] bg-green-bg border border-green-dim rounded-xl flex items-center justify-center">
-          <UserIcon className="w-5 h-5 text-green" />
-        </div>
-        <div>
-          <h2 className="vault-assistant-title">User Management</h2>
-          <p className="vault-assistant-sub">Access Control & Roles</p>
-        </div>
-      </div>
-
-      <div className="bg-surface border border-border rounded-2xl overflow-hidden shadow-2xl">
-        <div className="flex border-b border-border">
-          <button 
-            onClick={() => setActiveTab('pending')}
-            className={cn("flex-1 py-4 text-sm font-bold uppercase tracking-widest transition-colors", activeTab === 'pending' ? "text-green border-b-2 border-green bg-green/5" : "text-text-3 hover:text-text-2")}
-          >
-            Pending ({pendingUsers.length})
-          </button>
-          <button 
-            onClick={() => setActiveTab('approved')}
-            className={cn("flex-1 py-4 text-sm font-bold uppercase tracking-widest transition-colors", activeTab === 'approved' ? "text-green border-b-2 border-green bg-green/5" : "text-text-3 hover:text-text-2")}
-          >
-            Approved ({approvedUsers.length})
-          </button>
-        </div>
-
-        <div className="p-6">
-          {activeTab === 'pending' && (
-            <div className="space-y-4">
-              {pendingUsers.length === 0 ? (
-                <p className="text-center text-text-3 py-8 font-mono text-xs uppercase tracking-widest">No pending requests</p>
-              ) : (
-                pendingUsers.map(u => (
-                  <div key={u.uid} className="flex flex-col md:flex-row md:items-center justify-between bg-base border border-border rounded-xl p-4 gap-4">
-                    <div>
-                      <div className="font-bold text-text-1">{u.displayName}</div>
-                      <div className="text-sm text-text-3">{u.email}</div>
-                      <div className="mt-2 text-xs font-mono text-amber uppercase tracking-widest">Requested: {u.requestedRole}</div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => rejectUser(u.uid)}
-                        className="px-4 py-2 rounded-lg border border-red-500/20 text-red-500 hover:bg-red-500/10 font-mono text-xs uppercase tracking-widest transition-colors"
-                      >
-                        Reject
-                      </button>
-                      <button 
-                        onClick={() => approveUser(u.uid, u.requestedRole || 'staff')}
-                        className="px-4 py-2 rounded-lg bg-green text-black hover:bg-green/80 font-mono text-xs uppercase tracking-widest font-bold transition-colors"
-                      >
-                        Approve
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {activeTab === 'approved' && (
-            <div className="space-y-4">
-              {approvedUsers.length === 0 ? (
-                <p className="text-center text-text-3 py-8 font-mono text-xs uppercase tracking-widest">No approved users</p>
-              ) : (
-                approvedUsers.map(u => (
-                  <div key={u.uid} className="flex flex-col md:flex-row md:items-center justify-between bg-base border border-border rounded-xl p-4 gap-4">
-                    <div>
-                      <div className="font-bold text-text-1">{u.displayName}</div>
-                      <div className="text-sm text-text-3">{u.email}</div>
-                      <div className="mt-2 text-xs font-mono text-green uppercase tracking-widest">Role: {u.role}</div>
-                    </div>
-                    {u.uid !== currentUser?.uid && (
-                      <button 
-                        onClick={() => removeUser(u.uid)}
-                        className="px-4 py-2 rounded-lg border border-red-500/20 text-red-500 hover:bg-red-500/10 font-mono text-xs uppercase tracking-widest transition-colors"
-                      >
-                        Remove Access
-                      </button>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 };
 
 export default function App() {
@@ -2908,15 +2451,11 @@ export default function App() {
             <main>
               <Routes>
                 <Route path="/login" element={<Login />} />
-                <Route path="/request-access" element={<RequestAccess />} />
-                <Route path="/pending-approval" element={<PendingApproval />} />
-                <Route path="/access-rejected" element={<AccessRejected />} />
                 <Route path="/" element={<ProtectedRoute><RecipeList /></ProtectedRoute>} />
                 <Route path="/recipe/:id" element={<ProtectedRoute><RecipeDetail /></ProtectedRoute>} />
-                <Route path="/search" element={<ProtectedRoute><Can permission="useAssistant"><AISearch /></Can></ProtectedRoute>} />
-                <Route path="/add" element={<ProtectedRoute><Can permission="editRecipes"><RecipeForm /></Can></ProtectedRoute>} />
-                <Route path="/edit/:id" element={<ProtectedRoute><Can permission="editRecipes"><RecipeForm /></Can></ProtectedRoute>} />
-                <Route path="/users" element={<ProtectedRoute><Can permission="manageUsers"><UserManagement /></Can></ProtectedRoute>} />
+                <Route path="/search" element={<ProtectedRoute><AISearch /></ProtectedRoute>} />
+                <Route path="/add" element={<ProtectedRoute><RecipeForm /></ProtectedRoute>} />
+                <Route path="/edit/:id" element={<ProtectedRoute><RecipeForm /></ProtectedRoute>} />
               </Routes>
             </main>
           </Router>
