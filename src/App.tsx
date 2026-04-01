@@ -39,7 +39,8 @@ import { auth, db, isFirebaseConfigured } from "./firebase";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { 
   onAuthStateChanged, 
-  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult,
   GoogleAuthProvider, 
   signOut, 
   User 
@@ -287,6 +288,18 @@ const PERMISSIONS = {
   staff: ['useAssistant'],
 };
 
+// --- Loading Spinner ---
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center min-h-screen bg-base">
+    <div className="flex flex-col items-center gap-4">
+      <Loader2 className="w-10 h-10 animate-spin text-green" />
+      <p className="text-[10px] font-mono text-text-3 uppercase tracking-[0.2em] animate-pulse">
+        Initializing Vault Access...
+      </p>
+    </div>
+  </div>
+);
+
 // --- Auth Context ---
 interface AuthContextType {
   user: User | null;
@@ -319,16 +332,12 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (userSnap.exists()) {
         const profile = userSnap.data() as UserProfile;
         setUserProfile(profile);
-        if (profile.status === 'pending') {
-          window.location.href = '/pending';
-        } else if (profile.status === 'rejected') {
-          window.location.href = '/rejected';
-        }
+        // We don't redirect here anymore, AuthorizationGuard will handle it
       } else {
         const newProfile: UserProfile = {
           uid: firebaseUser.uid,
           email: firebaseUser.email || '',
-          displayName: firebaseUser.displayName || '',
+          displayName: firebaseUser.displayName || 'New User',
           role: null,
           status: 'pending',
           requestedRole: 'staff',
@@ -336,11 +345,10 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await setDoc(userRef, newProfile);
         console.log('[Auth] New user profile created in Firestore:', newProfile);
         setUserProfile(newProfile);
-        window.location.href = '/pending';
       }
     } catch (error) {
-      console.error('[Auth] Error handling post-login (Firestore write failed):', error);
-      handleFirestoreError(error, OperationType.WRITE, `users/${firebaseUser.uid}`);
+      console.error('[Auth] Error handling post-login (Firestore fetch failed):', error);
+      // We don't throw here to avoid blocking the loading state completion
     }
   };
 
@@ -355,31 +363,37 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    // Handle redirect result for mobile optimization
+    getRedirectResult(auth).catch((error) => {
+      console.error("[Auth] Redirect result error:", error);
+    });
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setLoading(true); // Ensure loading is true when state changes
       try {
-        setUser(user);
-        if (user) {
-          // Check if user is admin (hardcoded for now or fetch from Firestore)
+        setUser(firebaseUser);
+        if (firebaseUser) {
           const adminEmail = "fatsogee8@gmail.com";
-          setIsAdmin(user.email === adminEmail);
+          setIsAdmin(firebaseUser.email === adminEmail);
           
-          await handlePostLogin(user);
+          // Fetch or create profile
+          await handlePostLogin(firebaseUser);
           
-          // Sync user profile to Firestore
-          const userRef = doc(db, "users", user.uid);
-          try {
-            await setDoc(userRef, {
-              displayName: user.displayName || "Anonymous Operator",
-              email: user.email,
-              role: user.email === adminEmail ? "admin" : "user"
-            }, { merge: true });
-          } catch (error) {
-            // Log error but don't block auth state completion
-            console.error('Failed to sync user profile to Firestore:', error);
+          // Sync basic info if needed
+          if (firebaseUser.email === adminEmail) {
+            const userRef = doc(db, "users", firebaseUser.uid);
+            try {
+              await updateDoc(userRef, { role: "admin", status: "approved" });
+            } catch (e) {
+              console.warn("[Auth] Admin sync failed:", e);
+            }
           }
         } else {
           setIsAdmin(false);
+          setUserProfile(null);
         }
+      } catch (error) {
+        console.error("[Auth] onAuthStateChanged error:", error);
       } finally {
         setLoading(false);
       }
@@ -2445,13 +2459,13 @@ const Login = () => {
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
+      await signInWithRedirect(auth, provider);
     } catch (err) {
       console.error(err);
     }
   };
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-green" /></div>;
+  if (loading) return <LoadingSpinner />;
 
   return (
     <div className="min-h-[calc(100vh-64px)] flex items-center justify-center px-4">
@@ -2482,7 +2496,7 @@ const Login = () => {
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-green" /></div>;
+  if (loading) return <LoadingSpinner />;
   if (!user) return <Navigate to="/login" />;
   return <>{children}</>;
 };
@@ -2490,13 +2504,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 const AuthorizationGuard = ({ children }: { children: React.ReactNode }) => {
   const { user, loading, userProfile } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-base">
-        <Loader2 className="w-8 h-8 animate-spin text-green" />
-      </div>
-    );
-  }
+  if (loading) return <LoadingSpinner />;
 
   if (!user) return <Navigate to="/login" />;
 
@@ -2504,11 +2512,22 @@ const AuthorizationGuard = ({ children }: { children: React.ReactNode }) => {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-base">
         <div className="max-w-md w-full bg-surface border border-border rounded-2xl p-8 text-center shadow-lg">
-          <h2 className="text-xl font-bold text-text-1 mb-4">Pending Approval</h2>
-          <p className="text-text-3 text-sm">
-            Your account is currently awaiting approval from an administrator. 
-            Please check back later.
+          <div className="w-16 h-16 bg-amber/10 border border-amber/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Clock className="w-10 h-10 text-amber" />
+          </div>
+          <h2 className="text-xl font-bold text-text-1 mb-4 uppercase tracking-tight">Pending Approval</h2>
+          <p className="text-text-3 text-sm leading-relaxed">
+            Your account is currently awaiting verification from an administrator. 
+            Access to the Recipe Vault is restricted to authorized personnel.
           </p>
+          <div className="mt-8 pt-6 border-t border-border">
+            <button 
+              onClick={() => signOut(auth)}
+              className="text-[10px] font-mono text-text-3 hover:text-text-1 uppercase tracking-widest transition-colors"
+            >
+              Sign out and try another account
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -2520,7 +2539,7 @@ const AuthorizationGuard = ({ children }: { children: React.ReactNode }) => {
 const AdminGuard = ({ children }: { children: React.ReactNode }) => {
   const { userProfile, loading } = useAuth();
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-green" /></div>;
+  if (loading) return <LoadingSpinner />;
   if (userProfile?.role !== 'admin') return <Navigate to="/" />;
   return <>{children}</>;
 };
