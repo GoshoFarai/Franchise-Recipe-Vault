@@ -92,4 +92,4 @@ try {
   console.error("[Firebase] Initialization failed:", error);
 }
 
-export { auth, db, isFirebaseConfigured };
+export { auth, db, isFirebaseConfigured, handleFirestoreError, OperationType };
