@@ -57,8 +57,10 @@ import {
   serverTimestamp, 
   Timestamp,
   setDoc,
-  deleteDoc
+  deleteDoc,
+  updateDoc
 } from "firebase/firestore";
+import { AdminDashboard } from "./components/AdminDashboard";
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -508,6 +510,13 @@ const Header = () => {
               <div className="dropdown-user-name">{user.displayName}</div>
               <div className="dropdown-user-role uppercase">{isAdmin ? "ADMIN" : "OPERATOR"}</div>
             </div>
+
+            {isAdmin && (
+              <Link to="/admin" className="dropdown-item">
+                <span className="dropdown-item-icon">⚙️</span>
+                <span>ADMIN DASHBOARD</span>
+              </Link>
+            )}
 
             <button 
               className="dropdown-item"
@@ -2476,6 +2485,44 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+const AuthorizationGuard = ({ children }: { children: React.ReactNode }) => {
+  const { user, loading, userProfile } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-base">
+        <Loader2 className="w-8 h-8 animate-spin text-green" />
+      </div>
+    );
+  }
+
+  if (!user) return <Navigate to="/login" />;
+
+  if (userProfile?.role !== 'admin' && userProfile?.status !== 'approved') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-base">
+        <div className="max-w-md w-full bg-surface border border-border rounded-2xl p-8 text-center shadow-lg">
+          <h2 className="text-xl font-bold text-text-1 mb-4">Pending Approval</h2>
+          <p className="text-text-3 text-sm">
+            Your account is currently awaiting approval from an administrator. 
+            Please check back later.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+};
+
+const AdminGuard = ({ children }: { children: React.ReactNode }) => {
+  const { userProfile, loading } = useAuth();
+
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-green" /></div>;
+  if (userProfile?.role !== 'admin') return <Navigate to="/" />;
+  return <>{children}</>;
+};
+
 export default function App() {
   if (!isFirebaseConfigured) {
     return (
@@ -2509,11 +2556,12 @@ export default function App() {
             <main>
               <Routes>
                 <Route path="/login" element={<Login />} />
-                <Route path="/" element={<ProtectedRoute><RecipeList /></ProtectedRoute>} />
-                <Route path="/recipe/:id" element={<ProtectedRoute><RecipeDetail /></ProtectedRoute>} />
-                <Route path="/search" element={<ProtectedRoute><AISearch /></ProtectedRoute>} />
-                <Route path="/add" element={<ProtectedRoute><RecipeForm /></ProtectedRoute>} />
-                <Route path="/edit/:id" element={<ProtectedRoute><RecipeForm /></ProtectedRoute>} />
+                <Route path="/" element={<ProtectedRoute><AuthorizationGuard><RecipeList /></AuthorizationGuard></ProtectedRoute>} />
+                <Route path="/recipe/:id" element={<ProtectedRoute><AuthorizationGuard><RecipeDetail /></AuthorizationGuard></ProtectedRoute>} />
+                <Route path="/search" element={<ProtectedRoute><AuthorizationGuard><AISearch /></AuthorizationGuard></ProtectedRoute>} />
+                <Route path="/add" element={<ProtectedRoute><AuthorizationGuard><RecipeForm /></AuthorizationGuard></ProtectedRoute>} />
+                <Route path="/edit/:id" element={<ProtectedRoute><AuthorizationGuard><RecipeForm /></AuthorizationGuard></ProtectedRoute>} />
+                <Route path="/admin" element={<ProtectedRoute><AuthorizationGuard><AdminGuard><AdminDashboard /></AdminGuard></AuthorizationGuard></ProtectedRoute>} />
               </Routes>
             </main>
           </Router>
