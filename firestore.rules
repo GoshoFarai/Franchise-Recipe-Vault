@@ -1,123 +1,22 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: userId
-    // Fields:
-    //   - displayName: string (required, 1-100 chars)
-    //   - email: string (required, valid email)
-    //   - role: string (required, ['admin', 'user'])
-    //
-    // Collection: recipes
-    // Document ID: recipeId
-    // Fields:
-    //   - name: string (required, 1-200 chars)
-    //   - description: string (optional, max 2000 chars)
-    //   - base_yield_quantity: number (required, positive)
-    //   - base_yield_unit: string (required, 1-50 chars)
-    //   - station_assignment: string (required, 1-50 chars)
-    //   - food_safety_metadata: map (required)
-    //     - min_temp: number (required)
-    //     - hold_time: number (required)
-    //     - hold_time_minutes: number (required)
-    //   - ingredients: list (required, max 100 items)
-    //   - steps: list (required, max 50 items)
-    //   - tags: list (optional, max 20 items)
-    //   - allergens: list (optional, max 10 items)
-    //   - private_notes: string (optional, max 2000 chars)
-    //   - type: string (optional, ['menu', 'batch'])
-    //   - batchYield: number (optional)
-    //   - batchYieldUnit: string (optional)
-    //   - storage: string (optional)
-    //   - authorUid: string (required, immutable)
-    //   - createdAt: timestamp (required, immutable)
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    function isAdmin() {
-      return isAuthenticated() && 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true));
-    }
-
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'displayName', 'email', 'status', 'requestedRole']) &&
-             data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'status', 'requestedRole']) &&
-             data.uid is string && data.uid.size() > 0 &&
-             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
-             isValidEmail(data.email) &&
-             (data.role == null || data.role in ['admin', 'manager', 'chef', 'staff']) &&
-             data.status in ['pending', 'approved', 'rejected'] &&
-             data.requestedRole is string && data.requestedRole.size() >= 1 && data.requestedRole.size() <= 50;
-    }
-
-    function isValidRecipe(data) {
-      let requiredFields = ['name', 'base_yield_quantity', 'base_yield_unit', 'station_assignment', 'ingredients', 'steps', 'authorUid', 'createdAt', 'food_safety_metadata'];
-      let optionalFields = ['private_notes', 'tags', 'description', 'type', 'batchYield', 'batchYieldUnit', 'storage', 'allergens'];
-      
-      return data.keys().hasAll(requiredFields) &&
-             data.keys().hasOnly(requiredFields.concat(optionalFields)) &&
-             data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
-             (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
-             data.base_yield_quantity is number && data.base_yield_quantity > 0 &&
-             data.base_yield_unit is string && data.base_yield_unit.size() >= 1 && data.base_yield_unit.size() <= 50 &&
-             data.station_assignment is string && data.station_assignment.size() >= 1 && data.station_assignment.size() <= 50 &&
-             data.food_safety_metadata is map &&
-             data.food_safety_metadata.keys().hasAll(['min_temp', 'hold_time', 'hold_time_minutes']) &&
-             data.food_safety_metadata.min_temp is number &&
-             data.food_safety_metadata.hold_time is number &&
-             data.food_safety_metadata.hold_time_minutes is number &&
-             data.ingredients is list && data.ingredients.size() <= 100 &&
-             data.steps is list && data.steps.size() <= 50 &&
-             (!('tags' in data) || (data.tags is list && data.tags.size() <= 20)) &&
-             (!('allergens' in data) || (data.allergens is list && data.allergens.size() <= 10)) &&
-             (!('private_notes' in data) || (data.private_notes is string && data.private_notes.size() <= 2000)) &&
-             (!('type' in data) || (data.type is string && data.type in ['menu', 'batch'])) &&
-             (!('batchYield' in data) || (data.batchYield is number)) &&
-             (!('batchYieldUnit' in data) || (data.batchYieldUnit is string)) &&
-             (!('storage' in data) || (data.storage is string)) &&
-             data.authorUid is string &&
-             data.createdAt is timestamp;
-    }
-
-    // ===============================================================
-    // Rules
-    // ===============================================================
-
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
-                      (request.resource.data.role == null || 
-                       (request.resource.data.role == 'admin' && request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true));
-      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
-    }
+      // Allow users to create their own document
+      allow create: if request.auth != null && request.resource.data.status == 'pending';
 
-    match /recipes/{recipeId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidRecipe(request.resource.data) && request.resource.data.authorUid == request.auth.uid;
-      allow update: if isAuthenticated() && isValidRecipe(request.resource.data) && 
-                      ((resource.data.authorUid == request.auth.uid && request.resource.data.authorUid == resource.data.authorUid && request.resource.data.createdAt == resource.data.createdAt) || isAdmin());
-      allow delete: if isAuthenticated() && (resource.data.authorUid == request.auth.uid || isAdmin());
+      // Allow users to read their own document only if their status is approved
+      allow read: if request.auth != null && request.auth.uid == userId && resource.data.status == 'approved';
+
+      // Allow admin to approve users
+      allow update: if request.auth != null && request.auth.token.role == 'admin' && request.resource.data.status == 'approved';
+
+      // Allow admin to read all user documents
+      allow read: if request.auth != null && request.auth.token.role == 'admin';
+
+      // Prevent deletion of user documents
+      allow delete: if request.auth != null && request.auth.token.role == 'admin';
     }
   }
 }
