@@ -334,11 +334,13 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           requestedRole: 'staff',
         };
         await setDoc(userRef, newProfile);
+        console.log('[Auth] New user profile created in Firestore:', newProfile);
         setUserProfile(newProfile);
         window.location.href = '/pending';
       }
     } catch (error) {
-      console.error('Error handling post-login:', error);
+      console.error('[Auth] Error handling post-login (Firestore write failed):', error);
+      handleFirestoreError(error, OperationType.WRITE, `users/${firebaseUser.uid}`);
     }
   };
 
