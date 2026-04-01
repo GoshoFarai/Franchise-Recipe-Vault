@@ -1,4 +1,21 @@
-match /users/{userId} {
-  allow create: if request.auth != null && request.auth.uid == userId;
-  allow read, update: if request.auth != null && (resource.status == 'approved' || request.auth.token.admin == true);
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      // Allow read access to authenticated users only
+      allow read: if request.auth != null;
+
+      // Allow write access only to the user themselves, with pending status by default
+      allow write: if request.auth != null && request.auth.uid == userId && !exists(/databases/$(database)/documents/users/$(userId));
+
+      // Check if the user is approved
+      allow read, write: if request.auth != null && get(/databases/$(database)/documents/users/$(userId)).data.status == 'approved';
+    }
+  }
+
+  match /admin/{document=**} {
+    // Ensure only admins can access admin routes
+    allow read, write: if request.auth != null && request.auth.token.role == 'admin';
+  }
 }
