@@ -269,20 +269,76 @@ const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
 
 const useTheme = () => useContext(ThemeContext);
 
+interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: 'admin' | 'manager' | 'chef' | 'staff' | null;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedRole: string;
+}
+
+const PERMISSIONS = {
+  admin: ['editRecipes', 'deleteRecipes', 'manageUsers', 'useAssistant'],
+  manager: ['editRecipes', 'useAssistant'],
+  chef: ['editRecipes', 'useAssistant'],
+  staff: ['useAssistant'],
+};
+
 // --- Auth Context ---
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
+  userProfile: UserProfile | null;
+  can: (permission: string) => boolean;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, loading: true, isAdmin: false });
+const AuthContext = createContext<AuthContextType>({ user: null, loading: true, isAdmin: false, userProfile: null, can: () => false });
 
 const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+
+  const can = (permission: string) => {
+    if (!userProfile || !userProfile.role) return false;
+    const rolePermissions = PERMISSIONS[userProfile.role as keyof typeof PERMISSIONS] || [];
+    return rolePermissions.includes(permission);
+  };
+
+  const handlePostLogin = async (firebaseUser: User) => {
+    try {
+      const userRef = doc(db, 'users', firebaseUser.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists()) {
+        const profile = userSnap.data() as UserProfile;
+        setUserProfile(profile);
+        if (profile.status === 'pending') {
+          window.location.href = '/pending';
+        } else if (profile.status === 'rejected') {
+          window.location.href = '/rejected';
+        }
+      } else {
+        const newProfile: UserProfile = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          displayName: firebaseUser.displayName || '',
+          role: null,
+          status: 'pending',
+          requestedRole: 'staff',
+        };
+        await setDoc(userRef, newProfile);
+        setUserProfile(newProfile);
+        window.location.href = '/pending';
+      }
+    } catch (error) {
+      console.error('Error handling post-login:', error);
+    }
+  };
 
   useEffect(() => {
     const hasSeenOnboarding = localStorage.getItem("recipe-vault-onboarding-seen");
@@ -302,6 +358,8 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           // Check if user is admin (hardcoded for now or fetch from Firestore)
           const adminEmail = "fatsogee8@gmail.com";
           setIsAdmin(user.email === adminEmail);
+          
+          await handlePostLogin(user);
           
           // Sync user profile to Firestore
           const userRef = doc(db, "users", user.uid);
@@ -331,7 +389,7 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, isAdmin }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin, userProfile, can }}>
       {showOnboarding && user && <OnboardingModal onComplete={handleOnboardingComplete} />}
       {children}
     </AuthContext.Provider>
