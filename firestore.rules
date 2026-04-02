@@ -104,12 +104,15 @@ service cloud.firestore {
     // Rules
     // ===============================================================
 
-    match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
-                      (request.resource.data.role == null || 
-                       (request.resource.data.role == 'admin' && request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true));
-      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
+    match /users {
+      allow list: if isAdmin();
+      match /{userId} {
+        allow get: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                        (request.resource.data.role == null || 
+                         (request.resource.data.role == 'admin' && request.auth.token.email == "fatsogee8@gmail.com" && request.auth.token.email_verified == true));
+        allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
+      }
     }
 
     match /recipes/{recipeId} {
