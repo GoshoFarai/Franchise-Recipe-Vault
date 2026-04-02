@@ -384,6 +384,11 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             const userRef = doc(db, "users", firebaseUser.uid);
             try {
               await updateDoc(userRef, { role: "admin", status: "approved" });
+              // Refresh profile
+              const updatedSnap = await getDoc(userRef);
+              if (updatedSnap.exists()) {
+                setUserProfile(updatedSnap.data() as UserProfile);
+              }
             } catch (e) {
               console.warn("[Auth] Admin sync failed:", e);
             }
