@@ -2452,6 +2452,7 @@ const AISearch = () => {
 };
 
 const Login = () => {
+  const [error, setError] = useState<string | null>(null);
   const { user, loading } = useAuth();
   const navigate = useNavigate();
 
@@ -2462,11 +2463,13 @@ const Login = () => {
   }, [user, loading, navigate]);
 
   const handleLogin = async () => {
+    setError(null);
     const provider = new GoogleAuthProvider();
     try {
       await signInWithRedirect(auth, provider);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setError(`${err.code || 'Error'}: ${err.message || 'Failed to initiate sign-in'}`);
     }
   };
 
@@ -2488,6 +2491,12 @@ const Login = () => {
           <LogIn className="w-5 h-5" />
           Sign in with Google
         </button>
+
+        {error && (
+          <div className="mt-4 p-4 bg-red/10 border border-red/20 rounded-xl text-red text-xs font-mono text-left break-words">
+            {error}
+          </div>
+        )}
         
         <div className="mt-8 pt-8 border-t border-border">
           <p className="text-[10px] font-mono text-text-3 uppercase tracking-widest leading-relaxed">
