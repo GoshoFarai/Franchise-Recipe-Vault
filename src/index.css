@@ -1,35 +1,33 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300;1,9..40,400;1,9..40,500&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&family=Syne:wght@700;800&display=swap');
 @import "tailwindcss";
 
 :root {
-  --color-base: #080808;
-  --color-surface: #111111;
-  --color-elevated: #1a1a1a;
-  --color-border: #242424;
-  --color-border-hi: #333333;
+  --dark:        #191c1f;
+  --white:       #ffffff;
+  --surface:     #f4f4f4;
+  --surface-2:   #ebebeb;
+  --border:      #c9c9cd;
+  --text-1:      #191c1f;
+  --text-2:      #505a63;
+  --text-3:      #8d969e;
+  --teal:        #00a87e;
+  --teal-bg:     rgba(0,168,126,0.08);
+  --teal-border: rgba(0,168,126,0.2);
+  --blue:        #494fdf;
+  --danger:      #e23b4a;
+  --warning:     #ec7e00;
+  --radius-card: 20px;
+  --radius-pill: 9999px;
+}
 
-  --color-green: #22c55e;
-  --color-green-dim: #166534;
-  --color-green-bg: rgba(34,197,94,0.08);
-  --color-amber: #f59e0b;
-  --color-amber-dim: #92400e;
-  --color-amber-bg: rgba(245,158,11,0.08);
-  --color-red: #ef4444;
-  --color-red-dim: #991b1b;
-  --color-red-bg: rgba(239,68,68,0.08);
-  --color-blue: #3b82f6;
-  --color-blue-dim: #1e3a8a;
-  --color-blue-bg: rgba(59,130,246,0.08);
+html, body {
+  background: var(--white);
+  color: var(--text-1);
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
 
-  --color-text-1: #f0f0f0;
-  --color-text-2: #888888;
-  --color-text-3: #444444;
-
-  --color-red: #ef4444;
-
-  --font-mono: 'Space Mono', monospace;
-  --font-display: 'Syne', sans-serif;
-  --font-body: 'DM Sans', sans-serif;
+* {
+  box-shadow: none !important;
 }
 
 .light {
@@ -579,12 +577,8 @@ main {
 }
 
 .recipe-card:hover {
-  border-color: var(--green-dim);
-  box-shadow: 
-    0 20px 25px -5px rgba(0, 0, 0, 0.5),
-    0 8px 10px -6px rgba(0, 0, 0, 0.5),
-    0 0 20px var(--green-bg);
-  transform: translateY(-4px) scale(1.02);
+  border-color: var(--teal);
+  transform: translateY(-2px);
 }
 
 .recipe-card-bottom {

@@ -2486,7 +2486,7 @@ const Login = () => {
         
         <button 
           onClick={handleLogin}
-          className="w-full flex items-center justify-center gap-3 bg-white hover:bg-zinc-200 text-black px-6 py-4 rounded-xl font-mono text-sm font-bold uppercase tracking-widest transition-all"
+          className="btn-primary w-full flex items-center justify-center gap-3"
         >
           <LogIn className="w-5 h-5" />
           Sign in with Google
