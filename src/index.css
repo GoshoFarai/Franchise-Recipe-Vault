@@ -19,6 +19,17 @@
   --radius-pill: 9999px;
 }
 
+.dark {
+  --dark:        #ffffff;
+  --white:       #191c1f;
+  --surface:     #25282b;
+  --surface-2:   #313437;
+  --border:      #4a4d50;
+  --text-1:      #ffffff;
+  --text-2:      #a0a8b1;
+  --text-3:      #6c757d;
+}
+
 html, body {
   background: var(--white);
   color: var(--text-1);
